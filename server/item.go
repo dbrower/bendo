@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/hex"
+	"errors"
 	"expvar"
 	"fmt"
 	"html/template"
@@ -164,6 +165,13 @@ retry:
 	}
 
 	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, bid))
+	// use ServeContent to support range requests. Fall back to io.Copy if the
+	// data source does not support seeks.
+	if c, ok := content.r.(io.ReadSeeker); ok {
+		http.ServeContent(w, r, "", time.Time{}, c)
+		return
+	}
+
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", content.size))
 
 	// all the headers have been set, now do we need to copy bits?
@@ -188,8 +196,8 @@ type ContentStatus int
 
 const (
 	ContentUnknown ContentStatus = iota
-	ContentCached                // the content was sourced from the cache
-	ContentLarge                 // the content was very big and is not cached
+	ContentCached                // the content is sourced from the cache
+	ContentLarge                 // the content is very big and is not cached
 	ContentWaiting               // the content is being copied into the cache
 )
 
@@ -261,7 +269,7 @@ func (s *RESTServer) findContent(key string, id string, bid items.BlobID, doLoad
 	if cacheContents != nil {
 		// item was cached
 		result.status = ContentCached
-		result.r = NewReadCloser(cacheContents)
+		result.r = NewReadSeekCloser(cacheContents, length)
 		result.size = length
 		return result, nil
 	}
@@ -370,17 +378,23 @@ func (s *RESTServer) copyBlobIntoCache(key, id string, bid items.BlobID) {
 	keepcopy = true
 }
 
-// NewReadCloser converts a ReadAtCloser into a ReadCloser.
-func NewReadCloser(r store.ReadAtCloser) io.ReadCloser {
-	return &readcloser{r: r}
+// NewReadSeekCloser converts a ReadAtCloser into a ReadSeekCloser.
+func NewReadSeekCloser(r store.ReadAtCloser, size int64) io.ReadSeekCloser {
+	return &readseekcloser{r: r, size: size}
 }
 
-type readcloser struct {
-	r   store.ReadAtCloser
-	off int64
+var (
+	ErrInvalidPos = errors.New("Seek: cannot seek before read position")
+	ErrWhence     = errors.New("Seek: invalid whence")
+)
+
+type readseekcloser struct {
+	r    store.ReadAtCloser
+	off  int64
+	size int64
 }
 
-func (r *readcloser) Read(p []byte) (n int, err error) {
+func (r *readseekcloser) Read(p []byte) (n int, err error) {
 	n, err = r.r.ReadAt(p, r.off)
 	r.off += int64(n)
 	if err == io.EOF && n > 0 {
@@ -391,8 +405,31 @@ func (r *readcloser) Read(p []byte) (n int, err error) {
 	return
 }
 
-func (r *readcloser) Close() error {
+func (r *readseekcloser) Close() error {
 	return r.r.Close()
+}
+
+// Seek implements the io.Seek() interface
+func (r *readseekcloser) Seek(offset int64, whence int) (int64, error) {
+	var abs int64
+	switch whence {
+	case io.SeekStart:
+		abs = offset
+	case io.SeekCurrent:
+		abs = r.off + offset
+	case io.SeekEnd:
+		abs = r.size + offset
+	default:
+		return 0, ErrWhence
+	}
+	if abs < 0 {
+		return 0, ErrInvalidPos
+	}
+	if abs > r.size {
+		abs = r.size
+	}
+	r.off = abs
+	return abs, nil
 }
 
 // ItemHandler handles requests to GET /item/:id
