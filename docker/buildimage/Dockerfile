@@ -1,3 +1,4 @@
+VOLUME /var/lib/docker
 ARG CENTOS_VERSION=7
 FROM centos:${CENTOS_VERSION}
 RUN yum -y groupinstall "Development tools" \
