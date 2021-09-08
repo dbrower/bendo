@@ -9,3 +9,4 @@ bendo_storage/*
 bendo_cache/*
 config.local
 .vscode
+.DS_Store

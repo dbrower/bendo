@@ -52,7 +52,7 @@ func TestUpload(t *testing.T) {
 }
 
 func NewLocalBendoServer() (*ErrorServer, *httptest.Server) {
-	db, _ := server.NewQlCache("memory--server")
+	db, _ := server.NewQlCache("mem--server")
 	bendo := &server.RESTServer{
 		Validator:      server.NobodyValidator{},
 		Items:          items.NewWithCache(store.NewMemory(), items.NewMemoryCache()),
