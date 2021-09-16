@@ -1,4 +1,4 @@
-# Parameters for disadis-codebuild-new
+# Parameters for bendo-codebuild
 #
 StackName: bendo-codebuild-0921
 parameters:
