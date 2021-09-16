@@ -1,0 +1,12 @@
+# Parameters for disadis-codebuild-new
+#
+StackName: bendo-codebuild-0921
+parameters:
+  CodeBuildRole: "{{ CodeBuildRole }}"
+  LogRetention: "{{ LogRetention }}"
+  TargetBucket: "{{ TargetBucket }}"
+tags:
+  Owner: ESU
+  Description: bendo-codebuild from CF
+  Name: bendo-codebuild-0921
+  Contact: lib-esu-group@nd.edu
