@@ -1,0 +1,36 @@
+---
+#### Ansible playbook: ap-bendo-codebuild
+#### 
+####   - This playbook prompts for parameters and then builds the cloudformation
+####
+
+- hosts: localhost
+  connection: local
+  gather_facts: false
+  become: false
+  vars_prompt:
+    - name: CodeBuildRole
+      prompt: "Enter the CodeBuildRole (default ESUAdmin):" 
+      private: no
+      default: 'arn:aws:iam::230391840102:role/iam-ESUAdmin-PHO79WUYWVQ2'
+    - name: LogRetention
+      prompt: "Enter the LogRetention value (default 400): "
+      private: no
+      default: 400
+    - name: TargetBucket
+      prompt: "Enter the TargetBucket value (default bendo-rpm-bucket-1640xqmtgjc7s): "
+      private: no
+      default: 'bendo-rpm-bucket-1640xqmtgjc7s'
+
+
+  vars_files:
+    - ./vars/bendo-codebuild-stack.yml
+
+  tasks:
+  - name: Create Cloudformation Stack
+    cloudformation:
+      state: present
+      template: "./codebuild.yml"
+      stack_name: "{{ StackName }}"
+      template_parameters:  "{{ parameters }}"
+      tags: '{{ tags }}'
