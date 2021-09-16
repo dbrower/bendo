@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 
 
-Description: 'CodeBuild bendo from GitHub to S3 using hesburghlibraries/bendo-buildimage'
+Description: 'CodeBuild bendo from GitHub to S3 using ndlib/bendo-buildimage'
 
 
 Metadata:
@@ -55,12 +55,6 @@ Parameters:
     Description: Docker image
     Default: 'ndlib/bendo-buildimage'
 
-  BuildImageRHEL7:
-    Type: String
-    Description: Docker image
-    Default: 'ndlib/bendo-buildimage-7'
-
-
 
 Conditions:
 
@@ -109,7 +103,7 @@ Resources:
   Project:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: bendo
+      Name: !Sub ${AWS::StackName}-RPMBuilder
       Description: 'bendo from GitHub to S3 rpm'
       ServiceRole: !If [NoCodeBuildRole, !ImportValue 'codebuild:role', !Ref CodeBuildRole]
       TimeoutInMinutes: 5
@@ -125,34 +119,8 @@ Resources:
       Environment:
         Type: LINUX_CONTAINER
         ComputeType: BUILD_GENERAL1_SMALL
-        Image: !Ref BuildImage
+        Image: ndlib/bendo-buildimage
         ImagePullCredentialsType: SERVICE_ROLE
         RegistryCredential:
-          Credential: "/all/dockerhub/credentials"
+          Credential: /all/dockerhub/credentials
           CredentialProvider: SECRETS_MANAGER
-
-  ProjectRHEL7:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: bendo-rhel7
-      Description: 'bendo from GitHub to S3 rpm'
-      ServiceRole: !If [NoCodeBuildRole, !ImportValue 'codebuild:role', !Ref CodeBuildRole]
-      TimeoutInMinutes: 5
-      Source: {Type: GITHUB, Location: 'https://github.com/ndlib/bendo.git'}
-      Artifacts:
-        Type: S3
-        Packaging: NONE
-        NamespaceType: NONE
-        Path: bendo-rhel7
-        Name: rpms
-        Location: !If [NoBucket, !Ref Bucket, !Ref TargetBucket]
-        EncryptionDisabled: true
-      Environment:
-        Type: LINUX_CONTAINER
-        ComputeType: BUILD_GENERAL1_SMALL
-        Image: !Ref BuildImageRHEL7
-        ImagePullCredentialsType: SERVICE_ROLE
-        RegistryCredential:
-          Credential: "/all/dockerhub/credentials"
-          CredentialProvider: SECRETS_MANAGER
-...
