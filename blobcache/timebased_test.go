@@ -63,3 +63,33 @@ func TestExpireListTB(t *testing.T) {
 		r.Close()
 	}
 }
+
+func TestItemReading(t *testing.T) {
+	mem := store.NewMemory()
+	cache := NewTime(mem, time.Second)
+	cache.Stop() // turn off background process
+	// add item
+	w, _ := cache.Put("sample-item")
+	w.Write([]byte("hello world"))
+	w.Close()
+
+	// remember this cache entry
+	entry := cache.items["sample-item"]
+
+	// write item manifest
+	cache.writeIndexFile()
+
+	// sleep a tad
+	time.Sleep(50 * time.Millisecond)
+
+	// now start a new cache and see if the item has the same expire time.
+	// this tests whether the manifest file was read correctly
+	cache2 := NewTime(mem, time.Second)
+	cache2.Stop()
+	cache2.Scan()
+
+	entry2 := cache2.items["sample-item"]
+	if !entry.Expires.Equal(entry2.Expires) {
+		t.Error("Expected expiry", entry.Expires, "Got", entry2.Expires)
+	}
+}
