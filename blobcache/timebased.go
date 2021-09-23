@@ -213,8 +213,12 @@ func (te *TimeBased) MaxSize() int64 {
 // background is the goroutine that manages saving the index file and purging
 // expired keys.
 func (te *TimeBased) background() {
-	te.readIndexFile()
-	te.scanstore()
+	// this is done by Scan().
+	// one concern is if the background process runs before Scan() is called,
+	// it will replace the item-list file with an empty one. On the other hand
+	// it is easier to test if the background process does not do a Scan()
+	//te.readIndexFile()
+	//te.scanstore()
 
 	// Figure out how often to check for expired keys and save the index file.
 	// Duration is either 1/4 of the TTL or once a day, whichever is shorter.
@@ -308,7 +312,8 @@ func (te *TimeBased) readIndexFile() {
 	}
 	dec := json.NewDecoder(store.NewReader(rac))
 	var items map[string]timeEntry
-	dec.Decode(items)
+	dec.Decode(&items)
+	rac.Close()
 
 	// insert the new items into the map
 	te.expireM.Lock()
