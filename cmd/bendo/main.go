@@ -180,6 +180,7 @@ func setupDatabase(config *bendoConfig, s *server.RESTServer) {
 	var db interface {
 		server.FixityDB
 		items.ItemCache
+		server.BlobDB
 	}
 	var err error
 	if config.Mysql != "" {
@@ -201,6 +202,7 @@ func setupDatabase(config *bendoConfig, s *server.RESTServer) {
 	if db == nil || err != nil {
 		log.Fatalln("problem setting up database")
 	}
+	s.BlobDB = db
 	s.FixityDatabase = db
 	s.Items.SetCache(db)
 }

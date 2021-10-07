@@ -9,6 +9,8 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -25,12 +27,12 @@ var (
 	nCacheMiss = expvar.NewInt("cache.miss")
 )
 
-// blobDB are the methods we need to interact with the new item metadata caching.
+// BlobDB are the methods we need to interact with the new item metadata caching.
 // This interface is expected to grow as more functionality is moved to the database.
 //
 // The goal is to remove the original database Cache interface along with its hooks into the
 // item package.
-type blobDB interface {
+type BlobDB interface {
 	// Look up the metadata for the given item+blob id. Returns error if error encountered.
 	// returns nil,nil if the blob was not found in the index.
 	FindBlob(item string, blobid int) (*items.Blob, error)
@@ -53,53 +55,133 @@ func (s *RESTServer) SlotHandler(w http.ResponseWriter, r *http.Request, ps http
 	// the star parameter in httprouter returns the leading slash
 	slot := ps.ByName("slot")[1:]
 
-	item, err := s.Items.Item(id)
+	// if we have the empty path, reroute to the item metadata handler
+	if slot == "" {
+		s.ItemHandler(w, r, ps)
+		return
+	}
 
-	if err != nil {
+	binfo, err := s.resolveblob(id, slot)
+
+	if binfo == nil || err != nil {
 		switch {
 		case err == items.ErrNoStore:
 			// if item store use disabled, return 503
 			w.WriteHeader(503)
 			log.Printf("GET/HEAD /item/%s/%s returns 503 - tape disabled", id, slot)
-		case err == items.ErrNoItem:
+		case binfo == nil || err == items.ErrNoItem:
 			w.WriteHeader(404)
 		default:
 			raven.CaptureError(err, nil)
 			log.Println(id, ":", err)
 			w.WriteHeader(500)
 		}
-		fmt.Fprintln(w, err)
+		if err != nil {
+			fmt.Fprintln(w, err)
+		}
 		return
 	}
-	// if we have the empty path, reroute to the item metadata handler
+	w.Header().Set("X-Content-Sha256", hex.EncodeToString(binfo.SHA256))
+	w.Header().Set("X-Content-Md5", hex.EncodeToString(binfo.MD5))
+	w.Header().Set("Location", fmt.Sprintf("/item/%s/@blob/%d", id, binfo.ID))
+	s.getblob(w, r, id, binfo)
+}
+
+// IndexItem loads an item from the item store and indexes it into our blob database
+func (s *RESTServer) IndexItem(id string) error {
+	item, err := s.Items.Item(id)
+	if item != nil {
+		// this will reindex the item whether or not it is already in the database.
+		err = s.BlobDB.IndexItem(id, item)
+	}
+	return err
+}
+
+// resolveblob tries to resolve the given item+slotpath identifier to a particular
+// blob, and returns information for that blob. If there is an error doing the
+// resoultion, the error is returned. If the item+slotpath did not resolve to a blob,
+// a nil is returned with no error.
+//
+// This will try to use the database only to do the resolution, but will scan the
+// tape store if no resoultion was found in the database.
+//
+// Always going to tape is useful for now since not everything might be indexed and it
+// keeps the tape system as the source of truth. But it is not that performant.
+// Possible optimizations might be an in-memory list of not-found items on tape, or
+// changing the semantics so that if it is not in the database, it doesn't exist.
+func (s *RESTServer) resolveblob(itemID string, slot string) (*items.Blob, error) {
+	binfo, err := s.resolveblob0(itemID, slot)
+	if binfo == nil && err == nil && s.useTape {
+		// look on tape for the item
+		err = s.IndexItem(itemID)
+		if err != nil {
+			return nil, err
+		}
+		// now that we have indexed it, try using the database again
+		binfo, err = s.resolveblob0(itemID, slot)
+	}
+	return binfo, err
+}
+
+// resolveblob0 does a resolution using only the database. It does not touch the tape.
+//
+// This handles paths having the following forms:
+//
+// 		path/to/file  		-> finds a slot having this name in the current item version
+// 		@blob/ID 			-> returns a blob having the number ID
+// 		@N/path/to/file 	-> returns the blob having that slot name in version N
+// 		<empty>  			-> never resolves to a blob
+//
+// Returns nil for the *Blob if we couldn't match the path to a blob.
+//
+// Note 1: this makes slot names beginning with "@" special. Perhaps at some point it might
+// be desired to support file names beginning with an "@". This is the only place where
+// this path mapping behavior is used.
+//
+// Note 2: There is duplicate code in items/item.go, but it is considered deprecated.
+func (s *RESTServer) resolveblob0(itemID string, slot string) (*items.Blob, error) {
 	if slot == "" {
-		s.ItemHandler(w, r, ps)
-		return
+		return nil, nil
 	}
-	// slot might have a "@nnn" version prefix
-	bid := item.BlobByExtendedSlot(slot)
-	if bid == 0 {
-		w.WriteHeader(404)
-		fmt.Fprintf(w, "Invalid Version")
-		return
+	// handle "@blob/nnn" path
+	if strings.HasPrefix(slot, "@blob/") {
+		// try to parse the blob number
+		b, err := strconv.ParseInt(slot[6:], 10, 0)
+		if err != nil || b <= 0 {
+			return nil, nil
+		}
+		return s.BlobDB.FindBlob(itemID, int(b))
 	}
-	w.Header().Set("X-Content-Sha256", hex.EncodeToString(item.Blobs[bid-1].SHA256))
-	w.Header().Set("X-Content-Md5", hex.EncodeToString(item.Blobs[bid-1].MD5))
-	w.Header().Set("Location", fmt.Sprintf("/item/%s/@blob/%d", id, bid))
-	s.getblob(w, r, id, items.BlobID(bid))
+	if slot[0] != '@' {
+		// common case...no version
+		return s.BlobDB.FindBlobBySlot(itemID, 0, slot)
+	}
+	// handle "@nnn/path/to/file" paths
+	var err error
+	var vid int64
+	j := strings.Index(slot, "/")
+	if j >= 1 {
+		// start from index 1 to skip initial "@"
+		vid, err = strconv.ParseInt(slot[1:j], 10, 0)
+	}
+	// if j was invalid, then vid == 0, so following will catch it
+	if err != nil || vid <= 0 {
+		return nil, nil
+	}
+	return s.BlobDB.FindBlobBySlot(itemID, int(vid), slot[j+1:])
 }
 
 // getblob will find the given blob, either in the cache or on
 // tape, and then send it as a response. If there is an error, it
 // will return an error response.
-func (s *RESTServer) getblob(w http.ResponseWriter, r *http.Request, id string, bid items.BlobID) {
+func (s *RESTServer) getblob(w http.ResponseWriter, r *http.Request, id string, binfo *items.Blob) {
 	// GET requests always cache content. HEAD requests cache content only if
 	// the Request-Cache header is passed (with any value)
 	docache := r.Method == "GET" || r.Header.Get("Request-Cache") != ""
-	key := fmt.Sprintf("%s+%04d", id, bid)
+	key := fmt.Sprintf("%s+%04d", id, binfo.ID)
 	firsttime := true
 retry:
-	content, err := s.findContent(key, id, bid, docache)
+	content, err := s.findContent(key, id, binfo, docache)
 	if err == items.ErrNoStore {
 		w.WriteHeader(503)
 		fmt.Fprintln(w, err)
@@ -164,7 +246,7 @@ retry:
 		return
 	}
 
-	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, bid))
+	w.Header().Set("ETag", fmt.Sprintf(`"%d"`, binfo.ID))
 	// use ServeContent to support range requests. Fall back to io.Copy if the
 	// data source does not support seeks.
 	if c, ok := content.r.(io.ReadSeeker); ok {
@@ -180,7 +262,7 @@ retry:
 	}
 	n, err := io.Copy(w, content.r)
 	if err != nil {
-		log.Printf("getblob (%s,%d) %d,%s", id, bid, n, err.Error())
+		log.Printf("getblob (%s,%d) %d,%s", id, binfo.ID, n, err.Error())
 	}
 }
 
@@ -260,7 +342,7 @@ out:
 // findContent will look in the cache and on tape for the given blob. If
 // it is not in the cache, it will load it into the cache, if doLoad is true.
 // (This is to facilitate HEAD requests that shouldn't recall content).
-func (s *RESTServer) findContent(key string, id string, bid items.BlobID, doLoad bool) (contentSource, error) {
+func (s *RESTServer) findContent(key string, id string, binfo *items.Blob, doLoad bool) (contentSource, error) {
 	var result contentSource
 	cacheContents, length, err := s.Cache.Get(key)
 	if err != nil {
@@ -277,11 +359,7 @@ func (s *RESTServer) findContent(key string, id string, bid items.BlobID, doLoad
 	if !s.useTape {
 		return result, items.ErrNoStore
 	}
-	blobinfo, err := s.Items.BlobInfo(id, bid)
-	if err != nil {
-		return result, err
-	}
-	length = blobinfo.Size
+	length = binfo.Size
 	result.size = length
 	if !doLoad {
 		result.status = ContentWaiting
@@ -304,7 +382,7 @@ func (s *RESTServer) findContent(key string, id string, bid items.BlobID, doLoad
 			s.tapeinflight = &singleflight.Group{}
 		}
 		c := s.tapeinflight.DoChan(key, func() (interface{}, error) {
-			s.copyBlobIntoCache(key, id, bid)
+			s.copyBlobIntoCache(key, id, binfo.ID)
 			return nil, nil
 		})
 		result.status = ContentWaiting
@@ -313,7 +391,7 @@ func (s *RESTServer) findContent(key string, id string, bid items.BlobID, doLoad
 	}
 	// item is too large to be cached
 	// get it directly from tape
-	realContents, _, err := s.Items.Blob(id, bid)
+	realContents, _, err := s.Items.Blob(id, binfo.ID)
 	if err != nil {
 		return result, err
 	}

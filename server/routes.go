@@ -63,6 +63,11 @@ type RESTServer struct {
 	// Cache keeps smallish blobs retreived from tape.
 	Cache blobcache.T
 
+	// BlobDB holds the item/version/slot/blob information in a structured way
+	// so we can query it without needing to read and parse the JSON structures
+	// describing items.
+	BlobDB BlobDB
+
 	// Fixity stores the records tracking past and future fixity checks.
 	FixityDatabase FixityDB
 	DisableFixity  bool
