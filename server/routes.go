@@ -239,6 +239,10 @@ func (s *RESTServer) addRoutes() http.Handler {
 		{"GET", "/bundle/list/", RoleRead, s.BundleListHandler},
 		{"GET", "/bundle/open/:key", RoleRead, s.BundleOpenHandler},
 
+		// UI routes.
+		// these routes are not covered by the API spec and can change at any time
+		{"GET", "/ui/items", RoleUnknown, s.UIItemsHandler},
+
 		// other
 		{"GET", "/", RoleUnknown, WelcomeHandler},
 		{"GET", "/stats", RoleUnknown, NotImplementedHandler},

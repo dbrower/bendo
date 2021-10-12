@@ -287,6 +287,71 @@ func (qc *QlCache) IndexItem(item string, thisItem *items.Item) error {
 	return tx.Commit()
 }
 
+func (qc *QlCache) GetItemList(offset int, pagesize int, sortorder string) ([]SimpleItem, error) {
+	query := buildQLItemListQuery(offset, pagesize, sortorder)
+	var results []SimpleItem
+
+	rows, err := qc.db.Query(query, pagesize, offset)
+	if err == sql.ErrNoRows {
+		// no next record
+		return results, nil
+	} else if err != nil {
+		log.Println("GetItemList Query QL", err)
+		raven.CaptureError(err, nil)
+		return results, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rec = SimpleItem{}
+		err = rows.Scan(&rec.ID, &rec.Created, &rec.Modified, &rec.Size)
+		if err != nil {
+			log.Println("GetItemList Scan QL", err)
+			raven.CaptureError(err, nil)
+			continue
+		}
+		results = append(results, rec)
+	}
+	return results, nil
+}
+
+// construct an return an sql query and parameter list, using the parameters passed
+func buildQLItemListQuery(offset int, pagesize int, sortorder string) string {
+	var query bytes.Buffer
+	query.WriteString("SELECT item, created, modified, size FROM items ")
+
+	sortcolumn := ""
+	decending := false
+	if strings.HasPrefix(sortorder, "-") {
+		decending = true
+		sortorder = sortorder[1:]
+	}
+	switch sortorder {
+	case "name":
+		sortcolumn = "item"
+	case "size":
+		sortcolumn = "size"
+	case "modified":
+		sortcolumn = "modified"
+	case "created":
+		sortcolumn = "created"
+	}
+	if sortcolumn != "" {
+		query.WriteString("ORDER BY ")
+		query.WriteString(sortcolumn)
+		if decending {
+			query.WriteString(" DESC ")
+		}
+	}
+
+	query.WriteString(" ORDER BY scheduled_time ")
+	query.WriteString(" LIMIT ?1 ")
+	if offset > 0 {
+		query.WriteString("OFFSET ?2 ")
+	}
+	return query.String()
+}
+
 // NextFixity will return the item id of the earliest scheduled fixity check
 // that is before the cutoff time. If there is no such record 0 is returned.
 func (qc *QlCache) NextFixity(cutoff time.Time) int64 {
