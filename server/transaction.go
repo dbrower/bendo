@@ -161,6 +161,7 @@ func (s *RESTServer) transactionWorker(queue <-chan string) {
 				}
 			}
 			tx.Commit(*s.Items, s.FileStore, s.Cache)
+			s.IndexItem(tx.ItemID)
 		}
 	out:
 		duration := time.Now().Sub(start)

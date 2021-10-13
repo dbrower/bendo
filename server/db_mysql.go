@@ -26,7 +26,7 @@ type MsqlCache struct {
 
 var _ items.ItemCache = &MsqlCache{}
 var _ FixityDB = &MsqlCache{}
-var _ blobDB = &MsqlCache{}
+var _ BlobDB = &MsqlCache{}
 
 // List of migrations to perform. Add new ones to the end.
 // DO NOT change the order of items already in this list.

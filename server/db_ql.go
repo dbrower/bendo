@@ -27,7 +27,7 @@ type QlCache struct {
 
 var _ items.ItemCache = &QlCache{}
 var _ FixityDB = &QlCache{}
-var _ blobDB = &QlCache{}
+var _ BlobDB = &QlCache{}
 
 // List of migrations to perform. Add new ones to the end.
 // DO NOT change the order of items already in this list.

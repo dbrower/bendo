@@ -340,6 +340,7 @@ func init() {
 		TxStore:        transaction.New(store.NewMemory()),
 		FileStore:      fragment.New(store.NewMemory()),
 		Cache:          blobcache.NewLRU(store.NewMemory(), 400),
+		BlobDB:         db,
 		FixityDatabase: db,
 		useTape:        true,
 	}
