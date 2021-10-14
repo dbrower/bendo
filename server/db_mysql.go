@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	// no _ in import mysql since we need mysql.NullTime
@@ -197,6 +198,82 @@ func (ms *MsqlCache) FindBlobBySlot(item string, version int, slot string) (*ite
 		return nil, err
 	}
 	return ms.FindBlob(item, bid)
+}
+
+func (ms *MsqlCache) GetItemList(offset int, pagesize int, sortorder string) ([]SimpleItem, error) {
+	query, args := buildItemListQuery(offset, pagesize, sortorder)
+	var results []SimpleItem
+
+	rows, err := ms.db.Query(query, args...)
+	if err == sql.ErrNoRows {
+		// no next record
+		return results, nil
+	} else if err != nil {
+		log.Println("GetItemList Query MySQL", err)
+		raven.CaptureError(err, nil)
+		return results, nil
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var rec = SimpleItem{}
+		var created mysql.NullTime
+		var modified mysql.NullTime
+		err = rows.Scan(&rec.ID, &created, &modified, &rec.Size)
+		if err != nil {
+			log.Println("GetItemList Scan MySQL", err)
+			raven.CaptureError(err, nil)
+			continue
+		}
+		if created.Valid {
+			rec.Created = created.Time
+		}
+		if modified.Valid {
+			rec.Modified = modified.Time
+		}
+		results = append(results, rec)
+	}
+	return results, nil
+}
+
+// construct an return an sql query and parameter list, using the parameters passed
+func buildItemListQuery(offset int, pagesize int, sortorder string) (string, []interface{}) {
+	var query bytes.Buffer
+	// The mysql driver does not have positional parameters, so we build the
+	// parameter list in parallel to the query.
+	var args []interface{}
+	query.WriteString("SELECT item, created, modified, size FROM items ")
+
+	sortcolumn := ""
+	decending := false
+	if strings.HasPrefix(sortorder, "-") {
+		decending = true
+		sortorder = sortorder[1:]
+	}
+	switch sortorder {
+	case "name":
+		sortcolumn = "item"
+	case "size":
+		sortcolumn = "size"
+	case "modified":
+		sortcolumn = "modified"
+	case "created":
+		sortcolumn = "created"
+	}
+	if sortcolumn != "" {
+		query.WriteString("ORDER BY ")
+		query.WriteString(sortcolumn)
+		if decending {
+			query.WriteString(" DESC ")
+		}
+	}
+	query.WriteString(" LIMIT ? ")
+	args = append(args, pagesize)
+	if offset > 0 {
+		query.WriteString("OFFSET ? ")
+		args = append(args, offset)
+	}
+	return query.String(), args
 }
 
 // IndexItem adds row entries for every version, slot, and blob

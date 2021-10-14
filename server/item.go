@@ -46,6 +46,9 @@ type BlobDB interface {
 	// Index the given item using the given id.
 	// (The item id should already be in the item structure. can that parameter be removed?)
 	IndexItem(itemid string, item *items.Item) error
+
+	// GetItemList returns a list of item information for a listing page.
+	GetItemList(offset int, pagesize int, sortorder string) ([]SimpleItem, error)
 }
 
 // SlotHandler handles requests to GET /item/:id/*slot
