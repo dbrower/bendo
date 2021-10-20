@@ -150,3 +150,33 @@ func (ld listValidator) TokenValid(token string) (string, Role, error) {
 	}
 	return "", RoleUnknown, nil
 }
+
+// A ValidatorMux allows many validators to be combined. It returns the highest
+// role (and associated username) it finds for a given token. If any error is
+// encountered, the error is returned instead.
+type ValidatorMux struct {
+	Validators []TokenValidator
+}
+
+// Add the provided TokenValidator to the end of the search list. There is no
+// protecting mutex, so do not call if other goroutines could be calling
+// TokenValid()
+func (mux *ValidatorMux) Add(v TokenValidator) {
+	mux.Validators = append(mux.Validators, v)
+}
+
+func (mux *ValidatorMux) TokenValid(token string) (string, Role, error) {
+	user := ""
+	role := RoleUnknown
+	for _, v := range mux.Validators {
+		u, r, err := v.TokenValid(token)
+		if err != nil {
+			return "", RoleUnknown, err
+		}
+		if r > role {
+			user = u
+			role = r
+		}
+	}
+	return user, role, nil
+}
