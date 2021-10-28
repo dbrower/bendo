@@ -29,6 +29,55 @@ func TestAtoRole(t *testing.T) {
 	}
 }
 
+func TestTokenMux(t *testing.T) {
+	var lists = []string{
+		`a mdonly 123
+		 b write 234
+		 c admin 345
+		 d read 456`,
+		`bb read 234
+		 c admin 345
+		 dd admin 456
+		 e write 567`,
+		`b read 234
+		 cc admin 345
+		 f mdonly 678`,
+	}
+	mux := ValidatorMux{}
+	for _, list := range lists {
+		d, err := NewListValidatorString(list)
+		if err != nil {
+			t.Fatalf("Received %s", err)
+		}
+		mux.Add(d)
+	}
+
+	var table = []struct {
+		input string
+		user  string
+		role  Role
+	}{
+		{"123", "a", RoleMDOnly}, // in first list
+		{"567", "e", RoleWrite},  // in second list
+		{"---", "", RoleUnknown}, // in no lists
+		{"234", "b", RoleWrite},  // return highest role
+		{"345", "c", RoleAdmin},  // use first name for highest role
+		{"456", "dd", RoleAdmin}, // use highest role name
+		{"678", "f", RoleMDOnly}, // query every list
+	}
+
+	for _, row := range table {
+		t.Logf("Testing %v", row)
+		user, role, err := mux.TokenValid(row.input)
+		if err != nil {
+			t.Errorf("Received error %s", err.Error())
+		}
+		if user != row.user || role != row.role {
+			t.Errorf("Received %s, %v, expected %v", user, role, row)
+		}
+	}
+}
+
 func TestListValid(t *testing.T) {
 	d, err := NewListValidatorString(`a  mdonly  123
 	b write 234
