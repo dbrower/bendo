@@ -7,7 +7,7 @@ require (
 	github.com/BurntSushi/toml v0.2.0
 	github.com/SpectraLogic/ds3_go_sdk v5.2.0+incompatible
 	github.com/antonholmquist/jason v1.0.0
-	github.com/aws/aws-sdk-go v1.29.3
+	github.com/aws/aws-sdk-go v1.33.0
 	github.com/certifi/gocertifi v0.0.0-20180118203423-deb3ae2ef261 // indirect
 	github.com/cznic/b v0.0.0-20181122101859-a26611c4d92d // indirect
 	github.com/cznic/db v0.0.0-20181122101858-661fca3aa13d // indirect
